@@ -1,0 +1,608 @@
+---
+title: "Dolen_OT_neurons_phase1"
+author: "Loyal Goff and Genevieve Stein-O'Brien"
+date: "10/3/2018"
+output: html_document
+---
+
+# Initialize Environment
+```{r init}
+source('code/init.R')
+library(reticulate)
+use_condaenv('OT-reticulate')
+set.seed(1234)
+library("AnnotationDbi")
+library("org.Mm.eg.db")
+library("biomaRt")
+#only need to run when setting up environment, once set just call
+#conda_install('OT-reticulate','umap-learn') 
+#conda_install('OT-reticulate','louvain')
+```
+
+
+# Data Import
+```{r}
+#Gene FPKMs
+fpkms<-read.delim("../data/norms/Dolen_OT_Phase1_norm/genes.fpkm_table",row.names=1)
+gene_ann<-read.delim("../data/norms/Dolen_OT_Phase1_norm/genes.attr_table")
+rownames(gene_ann)<-gene_ann$tracking_id
+
+#Isoform FPKMs
+isoform_fpkms<-read.delim("../data/norms/Dolen_OT_Phase1_norm/isoforms.fpkm_table",row.names=1)
+rownames(isoform_fpkms) <- isoform_fpkms$tracking_id
+
+#Sample Annotation
+sample_ann<-read.delim("../data/norms/Dolen_OT_Phase1_norm/samples.table")
+
+sample_ann$cell_id<-unlist(lapply(as.character(sample_ann$sample_id),function(x){substr(x, 1, nchar(x)-2)}))
+
+master_cell_sheet<-read.delim("metadata/OT01_MasterSheet.txt",stringsAsFactors=T,na.string="NA")
+
+sample_info<-merge(sample_ann,master_cell_sheet,by.x='cell_id',by.y='cell_id',all.x=TRUE,sort=FALSE)
+rownames(sample_info)<-sample_info$cell_id
+colnames(fpkms)<-sample_info$cell_id
+colnames(isoform_fpkms)<-sample_info$cell_id
+
+#sample_info<-sample_info[,-1]
+gene_info<-read.delim("metadata/gencode.vM8.transcripts.filtered.gene_annotation.tab")
+#rownames(gene_info)<-gene_info$gene_id
+keyCols<-c("gene_status",'level','gene_type')
+gene_info[,keyCols]
+
+tmp<-merge(gene_ann,gene_info[,keyCols],by=0,sort=FALSE,all.x=TRUE)
+rownames(tmp)<-tmp$Row.names
+tmp<-tmp[,-1]
+
+gene_ann<-tmp[rownames(fpkms),]
+
+#lncRNA_geneIds<-rownames(gene_info)[gene_info$transcript_name == "lincRNA"]
+
+fd<-new("AnnotatedDataFrame",data=gene_ann)
+pd<-new("AnnotatedDataFrame",data=sample_info)
+#rownames(pd)<-make.names(sample_ann$sample_id)
+
+
+dat.relative <- newCellDataSet(as(as.matrix(fpkms), "sparseMatrix"),
+                      phenoData=pd,
+                      featureData=fd)
+
+#PCA to identify crazy outliers
+indx<-which(rowSums(as.matrix(exprs(dat.relative)))==0)
+tmp<-prcomp(t(exprs(dat.relative[-indx,])),scale=F,center=F)
+ggbiplot(tmp,var.axes=FALSE,circle=TRUE,groups=pData(dat.relative)$total_mass,scale=FALSE)
+which(tmp$x[,1]<(-500000))
+pData(dat.relative)["OT01_P3_H10",]
+which(tmp$x[,2]<(-4e+05))
+pData(dat.relative)["OT01_P1_G02",]
+
+ggbiplot(tmp,var.axes=FALSE,circle=TRUE,groups=pData(dat.relative)$source_plate,scale=FALSE,alpha=0.3)
+
+#ggbiplot
+badCells<-c()
+fpkm_matrix_adj <- relative2abs(dat.relative[,!colnames(dat.relative) %in% badCells], t_estimate=estimate_t(isoform_fpkms[,!colnames(isoform_fpkms) %in% badCells]),cores=detectCores()-1)
+
+# Or alternatively calculate on a model that accounts for labeling
+#fpkm_matrix_adj <- relative2abs(dat.relative, t_estimate=estimate_t(isoform_fpkms),modelStrFormula="~color", cores=6)
+
+dat <- newCellDataSet(as(as.matrix(fpkm_matrix_adj),"sparseMatrix"),
+                      phenoData = pd[!rownames(pd) %in% badCells,],
+                      featureData=fd,
+                      expressionFamily=negbinomial(),
+                      lowerDetectionLimit=1)
+
+
+#PCA 
+325
+ggbiplot(tmp,var.axes=FALSE,choices=c(1,2),circle=TRUE,groups=pData(dat)$Cell_Type_guess,scale=FALSE,alpha=0.7)
+plot(tmp)
+
+```
+
+# QC plots, summary stats, and filtering
+```{r copies_per_cell_qc}
+#Calculate total RNA mass per cell
+pData(dat)$Total_mRNAs <- Matrix::colSums(exprs(dat))
+
+#plot(colSums(exprs(dat)),colSums(round(exprs(dat))),pch=20,main="Copies per cell vs Rounded copies per cell")
+#abline(0,1)
+
+hist(pData(dat)$Total_mRNAs,breaks=100,col="darkgreen",main="Distribution of mRNA copies per cell")
+#dat<-dat[,pData(dat)$Total_mRNAs < 10000]
+pData(dat)$Total_mRNAs[order(pData(dat)$Total_mRNAs, decreasing=FALSE)]
+
+
+```
+
+```{r QC_and_Filtering}
+# 10000-1000000
+validcells <- row.names(subset(pData(dat), Total_mRNAs >= 10000 & Total_mRNAs <= 1000000))
+
+dat<- dat[,row.names(pData(dat)) %in% validcells]
+
+```
+
+```{r filter_by_num_genes_expressed}
+
+dat<-detectGenes(dat,min_expr=0.1)
+
+hist(pData(dat)$num_genes_expressed,breaks=50,col="steelblue",main="Genes expressed per cell")
+hist(fData(dat)$num_cells_expressed,breaks=50,col="red",main="Cells expressed per gene")
+
+#Expressed genes with expression in >=15 cells
+numCellThreshold<-5 # Maybe lower this
+expressed_genes<-row.names(subset(fData(dat),num_cells_expressed >= numCellThreshold))
+
+hist(fData(dat)$num_cells_expressed,breaks=50,col="red",main="Cells expressed per gene - threshold")
+abline(v=numCellThreshold,lty="dashed")
+
+###
+# High-coverage =  mass >= 5e+04
+####
+massThreshold<-1e+05
+hist(pData(dat)$total_mass,breaks=50,col="darkgreen",main="Distribution of Total mass by cell")
+abline(v=massThreshold,lty="dashed")
+
+#dat.filtered<-dat.filtered[,row.names(subset(pData(dat.filtered),total_mass >= massThreshold))]
+#dat.filtered<-detectGenes(dat.filtered,min_expr=1)
+
+#expressed_genes <- row.names(subset(fData(dat.filtered), 
+#                                    num_cells_expressed >= numCellThreshold))
+                                      #gene_type %in% c("protein_coding", "lincRNA")))
+
+#Cell Summary
+#p <- ggplot(pData(dat.filtered))
+#p + geom_bar(aes(x=factor(label_fixed),fill=factor(label_fixed)),width=0.5)+facet_grid(Day~label_fixed,scales="free_x") + ggtitle("Valid Cells per condition") + theme_bw() + scale_fill_manual(values=c("red","darkgreen")) 
+
+#pdf("cells_passing_filters.pdf")
+#p + geom_bar(aes(x=factor(label_fixed),fill=factor(label_fixed)),width=0.5)+facet_grid(Day~label_fixed,scales="free_x") + ggtitle("Valid Cells per condition") + theme_bw() + scale_fill_manual(values=c("red","darkgreen")) 
+#dev.off()
+
+
+saveRDS(dat,file="../data/filtered10kOxy.rds")
+
+```
+
+## Process CDS
+```{r}
+
+dat<-estimateSizeFactors(dat)
+dat<-estimateDispersions(dat,cores=4)
+dat<-detectGenes(dat)
+
+nCellCutoff<-5
+expressed_genes<-rownames(fData(dat))[fData(dat)$num_cells_expressed>=nCellCutoff]
+
+disp_table = dispersionTable(dat)
+disp_table = disp_table %>% mutate(excess_disp =
+  (dispersion_empirical - dispersion_fit) / dispersion_fit) %>%
+    arrange(plyr::desc(excess_disp))
+top_subset_genes = intersect(as.character(head(disp_table, 1000)$gene_id),disp_table$gene_id[disp_table$excess_disp>0])
+
+dat <- setOrderingFilter(dat, top_subset_genes)
+plot_ordering_genes(dat)
+
+
+dat <- preprocessCDS(dat,  method = 'PCA',
+                         norm_method = 'log',
+                         num_dim = 50,
+                         verbose = T)
+
+dat <- reduceDimension(dat, max_components = 2,
+                       reduction_method = 'UMAP',
+                       metric="correlation",
+                       #min_dist = 0.2,
+                       #n_neighbors = 50,
+                       verbose = T,
+                       random_state = 100L)
+
+dat <- clusterCells(dat,
+                        method = 'densityPeak',
+                        #res = 1e-3,
+                        #louvain_iter = 10,
+                        verbose = T,inspect_rho_sigma = T)
+
+
+saveRDS(dat,file="../data/filtered10kOxy.rds")
+
+
+
+###############
+dat<-readRDS(file="../data/filtered10kOxy.rds")
+
+
+summary(exprs(dat)[which(fData(dat)$gene_short_name=="Cnr1"),])
+plot(density(exprs(dat)[which(fData(dat)$gene_short_name=="Reln"),]))
+indx<-sapply(c("Cnr1","Reln","Calb1"), function(x) which(fData(dat)$gene_short_name==x))
+
+
+#pdf("plots/filtered10kClusters_weirdgroupign.pdf",width=10,height=10)
+plot_cell_clusters(dat,color="Cluster")
+plot_cell_clusters(dat,color="Total_mRNAs")
+plot_cell_clusters(dat,color="Fluorogold") + scale_color_manual(values=label_colors)
+plot_cell_clusters(dat,markers=c("Avp", "Oxt")) + scale_color_viridis(option="viridis")
+plot_cell_clusters(dat,color="source_plate") + scale_color_brewer(palette="Set1")
+#dev.off()
+
+
+pdf("plots/KChannels.pdf",width=40,height=40)
+plot_cell_clusters(dat,markers=KChannels)
+dev.off()
+    
+```
+
+## Celltype assignment
+```{r}
+pData(dat)$CellType<-"Magnocellular"
+pData(dat)$CellType[pData(dat)$Cluster==1]<-"Parvocellular"
+
+pdf("../plots/filtered10_calledClusters.pdf",width=10,height=10)
+plot_cell_clusters(dat,color="Fluorogold") + scale_color_manual(values=label_colors)
+plot_cell_clusters(dat,color="CellType") + scale_color_brewer(palette="Set1")
+plot_cell_clusters(dat,color="sort_date") + scale_color_brewer(palette="Set1")
+plot_cell_clusters(dat,color="source_plate") + scale_color_brewer(palette="Set1")
+plot_cell_clusters(dat,color="Total_mRNAs") 
+plot_cell_clusters(dat,markers=c("Avp", "Oxt")) + scale_color_viridis(option="viridis")
+dev.off()
+```
+
+
+# Differential testing
+```{r }
+
+#By Celltype
+PV_vs_Magno_res<-differentialGeneTest(dat[expressed_genes,],fullModelFormulaStr = "~num_genes_expressed+CellType",reducedModelFormulaStr = "~num_genes_expressed",cores=5)
+
+#saveRDS(PV_vs_Magno_res, file="PV_vs_Magno_res.rds")
+
+_
+#########
+dat<-readRDS("../data/filtered10kOxy.rds")
+pData(dat)$CellType<-"Magnocellular"
+pData(dat)$CellType[pData(dat)$Cluster==1]<-"Parvocellular"
+PV_vs_Magno_res<-readRDS("PV_vs_Magno_res.rds")
+nCellCutoff<-5
+expressed_genes<-rownames(fData(dat))[fData(dat)$num_cells_expressed>=nCellCutoff]
+
+qval_cutoff<-0.0000001
+qval_cutoff<-0.01
+PV_vs_Magno_sigGeneIDs<-PV_vs_Magno_res$gene_id[PV_vs_Magno_res$qval<=qval_cutoff]
+length(PV_vs_Magno_sigGeneIDs)
+
+pdf(paste0("../plots/sigGenes_heatmap_q_lt_",qval_cutoff,".pdf"),width=10,height=10)
+print(myPHeatmap(dat,PV_vs_Magno_sigGeneIDs,logMode=TRUE))
+dev.off()
+
+pdf("../plots/top_stringent_DE_genes_Magno_vs_Parvo.pdf",width=20,height=20)
+plot_cell_clusters(dat,markers=lookupGeneName(dat,PV_vs_Magno_sigGeneIDs),ncol=6) + scale_color_viridis(option="viridis")
+dev.off()
+
+#plot_cell_clusters(dat,markers=lookupGeneName(dat,sample(PV_vs_Magno_sigGeneIDs,12)))
+
+qval_cutoff<-0.01
+PV_vs_Magno_sigGeneIDs<-PV_vs_Magno_res$gene_id[PV_vs_Magno_res$qval<=qval_cutoff]
+length(PV_vs_Magno_sigGeneIDs)
+
+library("RColorBrewer")
+
+myPHeatmap<-function(cds,geneset,logMode=TRUE){
+  sub<-cds[lookupGeneId(cds,geneset),]
+  mat<-as.matrix(exprs(sub))
+  if(logMode){
+    mat<-log10(mat+1)
+  }
+  pheatmap(mat=log10(as.matrix(exprs(sub))+1),
+            scale="row",
+            labels_row=fData(sub)$gene_short_name,
+            annotation_col=pData(sub)[,c("source_plate","Total_mRNAs","num_genes_expressed","Cluster","Fluorogold")],
+            labelsCol=FALSE,  
+            color = colorRampPalette(rev(brewer.pal(n = 11, name ="PRGn")))(100),
+            clustering_distance_cols = "correlation",
+            clustering_distance_rows = "correlation",
+             show_rownames = T, show_colnames = F,
+             cutree_rows=2, cutree_cols=2, breaks=seq(-3,3,length=101))
+}
+
+pdf("../plots/sigGenes_heatmap_1percent_FDR.pdf",width=10,height=10)
+print(myPHeatmap(dat,PV_vs_Magno_sigGeneIDs,logMode=TRUE))
+dev.off()
+
+
+pdf(file="../plots/genes4Ale.pdf")
+plot_cell_clusters(dat,markers=c("Reln", "Cartpt", "Calb1", "Oxt"))
+dev.off()
+
+pdf(file="../plots/FMR1.pdf")
+plot_cell_clusters(dat,markers=c("Fmr1","Reln"))
+dev.off()
+
+
+plot_cell_clusters(dat,markers=c("Scng","Kcnmb4","Calb1","Nxph4","Scn3b","Cdh6","Cplx1","Gap43","Cartpt","Gabrq","Penk","Cacng3"))
+plot_cell_clusters(dat,markers=c("Ndrg2","Aldoc","Apoe","Sparc","Atp1a2","Sparcl1","Dbi","Mt1","Gsn","Mbp","Hbb−bs","Hba−a1","Cnp","Lars2","Serpine2","Cd9"))
+plot_cell_clusters(dat,markers=c("C2cd5","Ptprz1","S100a1","Kank1","Gpr37l1","Ppap2b","Gja1","Serpine2","Atp1b2","Fxyd1","Gsn","Cmtm5","Pla2g7","Htra1","Slc1a3","Agt","Ttyh1","Bcan","Mmd2","Lars2","Gm15564","Dbi","Ndrg2","Aldoc","Ntsr2","Atp1a2","Sparcl1","Sepp1","Apoe","Sparc","Plekhb1","Ddr1","Sept4","Sirt2","Josd2","Ptn","Scd2","Gpm6b","Ctss","Mbp","Hbb−bs","Hba−a1","Cnp","Mag","Plp1","Trf","Mal","Cldn11","Mobp","Hba−a2","Cryab","Hbb−bt","Mog","Cd9"))
+plot_cell_clusters(dat,markers=c("Sox5","Car10","C230004F18Rik","Nxph4","Cbln4","Cpne6","Me3","Igsf21","Reln","Brinp1","Scn3b"))
+
+pdf("KChannels.pdf",width=40,height=40)
+plot_cell_clusters(dat,markers=KChannels)
+dev.off()
+
+
+agt<-fData(dat)$gene_short_name[grep("Agt",fData(dat)$gene_short_name)]
+pdf("../plots/angiotensin.pdf",width=10,height=10)
+plot_cell_clusters(dat,markers=agt)
+dev.off()
+
+
+plot_cell_clusters(dat,markers=c("Sst")) + coord_equal(1)
+
+```
+
+```{r, eval=FALSE}
+# By Cluster (currently this is the same as by CellType unless we revisit cluster k)
+Cluster_res<-differentialGeneTest(dat[expressed_genes,],fullModelFormulaStr = "~num_genes_expressed+Cluster",reducedModelFormulaStr = "~num_genes_expressed",cores=6)
+
+#qval_cutoff<-0.01
+Cluster_sigGeneIDs<-Cluster_res$gene_id[Cluster_res$qval<=qval_cutoff]
+length(Cluster_sigGeneIDs)
+
+pdf(file="../plots/sigGeneIDs.pdf")
+plot_cell_clusters(dat,markers=sample(lookupGeneName(dat,Cluster_sigGeneIDs),12))
+dev.off()
+```
+
+```{r}
+#hypergeometric test for enrichment of Autism-associated genes in significant DE list
+ASDRiskGenes<-readxl::read_excel("../annotations/ASDRiskGenes.xlsx",sheet="FMRP ASD Risk Genes",skip=1)
+ASDRiskGenes
+ASDRiskGenes<-ASDRiskGenes[ASDRiskGenes$Gene %in% lookupGeneName(dat,expressed_genes),]
+
+NewASDRiskGenes<-readxl::read_excel("../annotations/ASDRiskGenes_Ale_update_6-5-19.xlsx",sheet="ASD Risk Genes",skip=1)
+NewASDRiskGenes$Gene<-tools::toTitleCase(stringr::str_to_lower(NewASDRiskGenes$Gene))
+NewASDRiskGenes
+NewASDRiskGenes<-NewASDRiskGenes[NewASDRiskGenes$Gene %in% lookupGeneName(dat,expressed_genes),]
+categoryCutoff<-4
+NewASDRiskGenes<-NewASDRiskGenes[NewASDRiskGenes$Category<=categoryCutoff,]
+
+SFARIRiskGenes<-readxl::read_excel("../annotations/ASDRiskGenes.xlsx",sheet="SFARI ASD RISK GENES",skip=2)
+SFARIRiskGenes
+SFARIRiskGenes$mouseGeneName<-tools::toTitleCase(stringr::str_to_lower(SFARIRiskGenes$Gene))
+SFARIRiskGenes<-SFARIRiskGenes[SFARIRiskGenes$mouseGeneName %in% lookupGeneName(dat,expressed_genes),]
+
+FMRPgenes<-readxl::read_excel("../annotations/FMRP binding partners Darnell.xlsx")
+FMRPgenes
+FMRPgenes<-FMRPgenes[FMRPgenes$'gene symbol' %in% lookupGeneName(dat,expressed_genes),]
+
+#use homologene for SFARIR
+human = useMart("ensembl", dataset = "hsapiens_gene_ensembl")
+mouse = useMart("ensembl", dataset = "mmusculus_gene_ensembl")
+
+map<-getLDS(attributes = c("ensembl_gene_id","hgnc_symbol"),filters = "hgnc_symbol", values = SFARIRiskGenes$Gene, mart = human,
+      attributesL = c("ensembl_gene_id","mgi_symbol","chromosome_name","start_position"), martL = mouse)
+str(map)
+
+indx<-match(SFARIRiskGenes$Gene,map$HGNC.symbol )
+SFARIRiskGenes$Gene[1]; map$HGNC.symbol[indx[1]]
+indx<-indx[!is.na(indx)]
+map<-map[indx,]             
+map<-map[map$MGI.symbol %in% lookupGeneName(dat,expressed_genes),]
+
+#ASDRisk
+GeneSetToTest<-NewASDRiskGenes$Gene
+k<-length(PV_vs_Magno_sigGeneIDs)
+n<-length(expressed_genes)-length(GeneSetToTest)
+m<-length(GeneSetToTest)
+q<-length(intersect(GeneSetToTest,lookupGeneName(dat,PV_vs_Magno_sigGeneIDs)))
+
+phyper(q,m,n,k, lower.tail=FALSE)
+
+
+#SFARI
+#GeneSetToTest<-SFARIRiskGenes$mouseGeneName
+#k<-length(PV_vs_Magno_sigGeneIDs)
+#n<-length(expressed_genes)-length(GeneSetToTest)
+#m<-length(GeneSetToTest)
+#q<-length(intersect(GeneSetToTest,lookupGeneName(dat,PV_vs_Magno_sigGeneIDs)))
+
+#phyper(q,m,n,k, lower.tail=FALSE)
+
+#SFARI
+#GeneSetToTest<-map$MGI.symbol
+#k<-length(PV_vs_Magno_sigGeneIDs)
+#n<-length(expressed_genes)-length(GeneSetToTest)
+#m<-length(GeneSetToTest)
+#q<-length(intersect(GeneSetToTest,lookupGeneName(dat,PV_vs_Magno_sigGeneIDs)))
+
+#phyper(q,m,n,k, lower.tail=FALSE)
+
+#FMRP
+GeneSetToTest<-FMRPgenes$Gene
+k<-length(PV_vs_Magno_sigGeneIDs)
+n<-length(expressed_genes)-length(GeneSetToTest)
+m<-length(GeneSetToTest)
+q<-length(intersect(GeneSetToTest,lookupGeneName(dat,PV_vs_Magno_sigGeneIDs)))
+
+phyper(q,m,n,k, lower.tail=FALSE)
+
+# Intersection
+GeneSetToTest<-intersect(FMRPgenes$Gene, NewASDRiskGenes$Gene)
+k<-length(PV_vs_Magno_sigGeneIDs)
+n<-length(expressed_genes)-length(GeneSetToTest)
+m<-length(GeneSetToTest)
+q<-length(intersect(GeneSetToTest,lookupGeneName(dat,PV_vs_Magno_sigGeneIDs)))
+
+phyper(q,m,n,k, lower.tail=FALSE)
+
+
+```
+
+```{r}
+pdf("../plots/significantly_DE_ASD_Risk_genes.pdf",width=10,height=10)
+plot_cell_clusters(dat,markers=intersect(GeneSetToTest,lookupGeneName(dat,PV_vs_Magno_sigGeneIDs))) + scale_color_viridis(option="viridis")
+dev.off()
+
+
+pdf("../plots/significantly_DE_ASD_Risk_genes_all.pdf",width=10,height=10)
+plot_cell_clusters(dat,markers=intersect(c(ASDRiskGenes$Gene,map$MGI.symbol),lookupGeneName(dat,PV_vs_Magno_sigGeneIDs))) + scale_color_viridis(option="viridis")
+dev.off()
+
+```
+
+
+```{r}
+#Calculate Cell Type Specific mean expression
+fData(dat)$Magno_mean_cpc<-Matrix::rowMeans(exprs(dat)[,pData(dat)$CellType=="Magnocellular"])
+fData(dat)$Parvo_mean_cpc<-Matrix::rowMeans(exprs(dat)[,pData(dat)$CellType=="Parvocellular"])
+fData(dat)$logfc<-log2(fData(dat)$Magno_mean_cpc/fData(dat)$Parvo_mean_cpc)
+
+fData(dat[lookupGeneId(dat,intersect(NewASDRiskGenes$Gene,lookupGeneName(dat,PV_vs_Magno_sigGeneIDs))),])$logfc
+fData(dat[lookupGeneId(dat,intersect(map$MGI.symbol,lookupGeneName(dat,PV_vs_Magno_sigGeneIDs))),])$logfc
+fData(dat[lookupGeneId(dat,intersect(FMRPgenes$'gene symbol',lookupGeneName(dat,PV_vs_Magno_sigGeneIDs))),])$logfc
+
+
+#fData(dat)$ASDRiskGene<-fData(dat)$gene_short_name %in% intersect(FMRPgenes$'gene symbol', map$MGI.symbol) # What is this for?
+fData(dat)$NewASDRiskGene<-fData(dat)$gene_short_name %in% NewASDRiskGenes$Gene # What is this for?
+fData(dat)$SFARIRiskGene<-fData(dat)$gene_short_name %in% SFARIRiskGenes$mouseGeneName
+fData(dat)$SFARIRiskGene<-fData(dat)$gene_short_name %in% map$MGI.symbol
+fData(dat)$FMRPgenes<-fData(dat)$gene_short_name %in% FMRPgenes$'gene symbol'
+fData(dat)$isSignificant<-fData(dat)$gene_short_name %in% lookupGeneName(dat,PV_vs_Magno_sigGeneIDs)
+
+FMRPgenes$'gene symbol'
+
+#remove genes with logfc == Inf
+fData(dat)<-fData(dat)[-which(fData(dat)$logfc==Inf),]
+
+r<-fData(dat)[fData(dat)$FMRPgenes & fData(dat)$SFARIRiskGene,]
+f<-fData(dat)[fData(dat)$ASDRiskGene & fData(dat)$SFARIRiskGene,]
+
+match(r$gene_short_name,f$gene_short_name)
+
+
+dim(fData(dat)[fData(dat)$SFARIRiskGene & fData(dat)$isSignificant,])
+
+fData(dat)[fData(dat)$FMRPgenes & fData(dat)$isSignificant,"logfc"]
+
+sum(fData(dat)[fData(dat)$FMRPgenes & fData(dat)$isSignificant,"logfc"]>0)
+
+indx<-fData(dat)[fData(dat)$SFARIRiskGene & fData(dat)$isSignificant,"gene_short_name"]
+# order genes for overlaps 
+indx<-c("Stxbp1","Slc6a1","Reln","Cnr1","Tanc2","Cib2","Zbtb20")
+pdf("../plots/significantly_DE_ASD_Risk_genes.pdf",width=10,height=10)
+plot_cell_clusters(dat,markers=indx) + scale_color_viridis(option="viridis")
+dev.off()
+
+
+c("Stxbp1","Slc6a1","Reln","Cnr1","Tanc2","Cib2","Zbtb20")
+
+fData(dat)[fData(dat)$ASDRiskGene & fData(dat)$isSignificant,"gene_short_name"]
+
+
+
+
+fData(dat)$isSignificant,]
+
+
+
+p<-ggplot(fData(dat[expressed_genes,])) +
+  geom_density(aes(x=logfc),alpha=0,color="black") + 
+  #geom_jitter(aes(x=logfc,y=0.3),height=0.02,color="blue",data=fData(dat)[fData(dat)$ASDRiskGene,]) + 
+  geom_density(aes(x=logfc),color="orange",fill="orange",alpha=0.3,data=fData(dat)[fData(dat)$NewASDRiskGene,]) + 
+  #geom_rug(aes(x=logfc),color="orange",fill="orange",alpha=0.3,data=fData(dat)[fData(dat)$ASDRiskGene,]) + 
+
+  #geom_text_repel(aes(x=logfc,y=0,label=gene_short_name),color="black",data=fData(dat)[fData(dat)$ASDRiskGene,]) + 
+  #geom_jitter(aes(x=logfc,y=0.1),height=0.02,color="red",data=fData(dat)[fData(dat)$ASDRiskGene & fData(dat)$isSignificant,]) + 
+  geom_density(aes(x=logfc),color="red",fill="red",alpha=0.3,data=fData(dat)[fData(dat)$ASDRiskGene & fData(dat)$isSignificant,]) + 
+  geom_density(aes(x=logfc),color="cyan",fill="cyan",alpha=0.3,data=fData(dat)[fData(dat)$FMRPgenes,]) + 
+  geom_density(aes(x=logfc),color="blue",fill="blue",alpha=0.3,data=fData(dat)[fData(dat)$FMRPgenes & fData(dat)$isSignificant,]) + 
+  #geom_jitter(aes(x=logfc,y=0.3),height=0.02,color="green",data=fData(dat)[fData(dat)$SFARIRiskGene,]) + 
+  geom_density(aes(x=logfc),color="green",fill="green",alpha=0.3,data=fData(dat)[fData(dat)$SFARIRiskGene,]) + 
+  #geom_jitter(aes(x=logfc,y=0.1),height=0.02,color="red",data=fData(dat)[fData(dat)$SFARIRiskGene & fData(dat)$isSignificant,]) + 
+  geom_density(aes(x=logfc),color="purple",fill="purple",alpha=0.3,data=fData(dat)[fData(dat)$SFARIRiskGene & fData(dat)$isSignificant,]) + 
+  
+  geom_point(aes(x=logfc,y=0),color="red",data=fData(dat)[fData(dat)$ASDRiskGene & fData(dat)$isSignificant,]) + 
+  geom_label_repel(aes(x=logfc,y=0,label=gene_short_name),color="black",data=fData(dat)[fData(dat)$ASDRiskGene & fData(dat)$isSignificant,]) + 
+
+  geom_rug(aes(x=logfc),color="orange",fill="orange",alpha=0.3,data=fData(dat)[fData(dat)$ASDRiskGene,]) + 
+  geom_rug(aes(x=logfc),color="cyan",fill="cyan",alpha=0.3,data=fData(dat)[fData(dat)$FMRPgenes,]) +
+
+  xlim(-10,10)+
+  geom_vline(aes(xintercept=0),linetype="dashed") +
+  monocle:::monocle_theme_opts()
+p
+
+pdf("../plots/logfc_distribution_by_genessets.pdf",width=5,height=5)
+p
+dev.off()
+
+Data(dat)[fData(dat)$FMRPgenes & fData(dat)$isSignificant,],binwidth=.5)
+
+p<-ggplot(fData(dat[expressed_genes,])) +
+  geom_density(aes(x=logfc),alpha=0,color="black") + 
+  geom_density(aes(x=logfc),color="orange",fill="orange",alpha=0.3,data=fData(dat)[fData(dat)$NewASDRiskGene,]) + 
+  geom_density(aes(x=logfc),color="red",fill="red",alpha=0.3,data=fData(dat)[fData(dat)$NewASDRiskGene & fData(dat)$isSignificant,]) +
+  geom_vline(aes(xintercept=0),linetype="dashed") +
+  xlim(-10,10)+ ggtitle("Density of Significant ASD Risk Genes") +
+  monocle:::monocle_theme_opts()
+p
+
+pdf("../plots/logfc_distribution_by_FMRP-ASDRiskGene.pdf",width=5,height=5)
+p
+dev.off()
+
+p<-ggplot(fData(dat[expressed_genes,])) +
+  #geom_histogram(aes(x=logfc),alpha=0,color="black") +
+  geom_histogram(aes(x=logfc,y=..density..),color="cyan",fill="cyan",alpha=0.3,data=fData(dat)[fData(dat)$FMRPgenes,]) + 
+  geom_histogram(aes(x=logfc,y=..density..),color="blue",fill="blue",alpha=0.3,data=fData(dat)[fData(dat)$FMRPgenes & fData(dat)$isSignificant,],binwidth=.5) + 
+   xlim(-10,10)+  ggtitle("Density of FMRP Genes") +
+  geom_vline(aes(xintercept=0),linetype="dashed") +
+  monocle:::monocle_theme_opts()
+p
+
+pdf("../plots/logfc_distribution_by_FMRP.pdf",width=5,height=5)
+p
+dev.off()
+
+p<-ggplot(fData(dat[expressed_genes,])) +
+  geom_density(aes(x=logfc),alpha=0,color="black") +
+  geom_density(aes(x=logfc),color="cyan",fill="cyan",alpha=0.3,data=fData(dat)[fData(dat)$FMRPgenes,]) + 
+  geom_density(aes(x=logfc),color="blue",fill="blue",alpha=0.3,data=fData(dat)[fData(dat)$FMRPgenes & fData(dat)$isSignificant,]) + 
+  #geom_jitter(aes(x=logfc,y=0.3),height=0.02,color="green",data=fData(dat)[fData(dat)$SFARIRiskGene,]) + 
+  geom_density(aes(x=logfc),color="green",fill="green",alpha=0.3,data=fData(dat)[fData(dat)$SFARIRiskGene,]) + 
+  #geom_jitter(aes(x=logfc,y=0.1),height=0.02,color="red",data=fData(dat)[fData(dat)$SFARIRiskGene & fData(dat)$isSignificant,]) + 
+  geom_density(aes(x=logfc),color="purple",fill="purple",alpha=0.3,data=fData(dat)[fData(dat)$SFARIRiskGene & fData(dat)$isSignificant,]) + 
+  xlim(-10,10)+
+  geom_vline(aes(xintercept=0),linetype="dashed") +
+  monocle:::monocle_theme_opts()
+p
+
+pdf("../plots/logfc_distribution_by_genessets.pdf",width=5,height=5)
+p
+dev.off()
+
+
+
+
+```
+
+```{r}
+#Distro tests
+
+slackr_msg(
+"_Are there more NewASDRiskGenes in parvo relative magno as compared to the distribution of all expressed genes_"
+)
+slackr(
+wilcox.test(fData(dat[lookupGeneId(dat,NewASDRiskGenes$Gene),])$logfc,fData(dat[lookupGeneId(dat,lookupGeneName(dat,expressed_genes)),])$logfc,alternative="less")
+)
+
+slackr_msg(
+  "_Are there more intersect(NewASDRiskGenes,significant_DE_genes) in parvo relative magno as compared to the distribution of all expressed genes_"
+)
+slackr(
+  wilcox.test(fData(dat[lookupGeneId(dat,intersect(NewASDRiskGenes$Gene,lookupGeneName(dat,PV_vs_Magno_sigGeneIDs))),])$logfc,fData(dat[lookupGeneId(dat,lookupGeneName(dat,expressed_genes)),])$logfc,alternative="less")
+)
+```
+
+
+# Session Information
+```{r}
+sessionInfo()
+```
+
