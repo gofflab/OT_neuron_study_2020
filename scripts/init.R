@@ -14,14 +14,10 @@ library(gplots)
 #############
 #slackr
 #############
-library(slackr)
+#
+# Redacted for github
+#
 
-slackrSetup(channel="#dolen_oxytocin_sc", 
-            #incoming_webhook_url="https://hooks.slack.com/services/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",
-            username="slackR",
-            api_token="xoxp-9317854839-9317673428-431659063763-79b68d407c25c45432b5cdb2c8a9ee68",
-            icon_emoji = ":computer:",
-            config_file="")
 ############
 # Color Palette
 ############
@@ -39,7 +35,7 @@ gg_color_hue <- function(n) {
 save.xlsx <- function (file, x, ...)
 {
   require(xlsx, quietly = TRUE)
-  
+
   for (i in 1:length(x)) {
     if (i == 1)
       write.xlsx(x[[i]], file, sheetName = names(x)[i], ...)
@@ -51,7 +47,7 @@ save.xlsx <- function (file, x, ...)
 save.xlsx.2 <- function (file, x, ...)
 {
   require(xlsx, quietly = TRUE)
-  
+
   for (i in 1:length(x)) {
     if (i == 1)
       write.xlsx(x[[i]], file, sheetName = paste("Cluster",i,sep=" "), ...)
@@ -159,7 +155,7 @@ myBarMap<-function(cds,geneset,facet_by="cluster",color_by="factor(cluster)",clu
   sub.melt.summary<-sub.melt %>%
     dplyr::group_by_(.dots=c("gene_short_name",facet_by_melt)) %>%
     dplyr::summarise(mean=mean(value),median=median(value),sd=sd(value),upper_bound=mean+sd,lower_bound=max(mean-sd,0))
-  
+
   if(cluster %in% c("row","both",T)){
     sub.sum.mat<-sub.melt.summary %>%
       recast(as.formula(paste("gene_short_name ~",facet_by)),measure.var="mean",fun.aggregate=mean)
@@ -168,7 +164,7 @@ myBarMap<-function(cds,geneset,facet_by="cluster",color_by="factor(cluster)",clu
     gene.order<-sub.sum.mat$gene_short_name[gene.order.idx]
     sub.melt$gene_short_name<-factor(sub.melt$gene_short_name, levels=gene.order)
   }
-  
+
   if(cluster %in% c("column","both",T)){
     sub.mat<-sub.melt %>%
       recast(as.formula("gene_short_name ~ cell_id"),measure.var="value",fun.aggregate=mean)
@@ -178,10 +174,10 @@ myBarMap<-function(cds,geneset,facet_by="cluster",color_by="factor(cluster)",clu
       #print(cell.order)
       sub.melt$cell_id<-factor(sub.melt$cell_id,levels=cell.order)
   }
-  
+
   p<-ggplot(sub.melt)
   p<-p + geom_bar(aes_string(x="cell_id",y="value",fill=color_by,color=color_by),stat="identity")
-  
+
   if(showSummary){
     p<-p + geom_hline(aes(yintercept=mean),data=sub.melt.summary,size=1.0)
     p<-p + geom_hline(aes(yintercept=upper_bound),data=sub.melt.summary,linetype="dashed")
@@ -189,7 +185,7 @@ myBarMap<-function(cds,geneset,facet_by="cluster",color_by="factor(cluster)",clu
   }
   p<-p +
     facet_grid(as.formula(paste("gene_short_name ~", facet_by)),scale=scale_axes,space=space,labeller=labeller(.default=label_both,gene_short_name=label_value)) +
-    theme_bw() + guides(color=FALSE) + 
+    theme_bw() + guides(color=FALSE) +
     theme(axis.text.x=element_blank(),
           axis.ticks.x=element_blank(),
           axis.title.x=element_blank(),
@@ -205,18 +201,18 @@ myBarMap<-function(cds,geneset,facet_by="cluster",color_by="factor(cluster)",clu
 myFacetedHeatMap<-function(cds,geneset,facet_by="celltype+Day",cluster="both",scale="row",space="free_x",limits=c(-5,5),...){
   sub.melt<-vstMeltCDS(cds,geneset,scale=scale,...)
   facet_by_melt<-strsplit(facet_by,"\\+")[[1]]
-  
+
   sub.mat<-sub.melt %>%
     recast(as.formula("gene_short_name ~ cell_id"),measure.var="value",fun.aggregate=mean)
   #print(apply(sub.mat[-1],1,mean))
-  
+
   if(cluster %in% c("row","both",T)){
     sub.hclust<-hclust2(dist(sub.mat[,-1]))
     gene.order.idx<-order.dendrogram(as.dendrogram(sub.hclust))
     gene.order<-sub.mat$gene_short_name[gene.order.idx]
     sub.melt$gene_short_name<-factor(sub.melt$gene_short_name, levels=gene.order)
   }
-  
+
   if(cluster %in% c("column","both",T)){
     sub.hclust<-hclust2(dist(t(sub.mat[,-1])))
     cell.order.idx<-order.dendrogram(as.dendrogram(sub.hclust))
@@ -224,13 +220,13 @@ myFacetedHeatMap<-function(cds,geneset,facet_by="celltype+Day",cluster="both",sc
     #print(cell.order)
     sub.melt$cell_id<-factor(sub.melt$cell_id,levels=cell.order)
   }
-  
+
   p<-ggplot(sub.melt)
   p<-p + geom_tile(aes_string(x="cell_id",y="gene_short_name",fill="value"))
-  
+
   p<-p +
     facet_grid(as.formula(paste(". ~ ", facet_by)),space=space,scale="free",labeller=labeller(.default=label_both,gene_short_name=label_value)) +
-    theme_bw() + guides(color=FALSE) + 
+    theme_bw() + guides(color=FALSE) +
     #scale_fill_viridis(name="Normalized Expression", label=comma) +
     scale_fill_gradient2(low="darkblue",mid="white",high="red",limits=limits,oob=squish) +
     theme(axis.text.x=element_blank(),
@@ -246,10 +242,10 @@ myFacetedHeatMap<-function(cds,geneset,facet_by="celltype+Day",cluster="both",sc
 }
 
 
-plot_genes_line<-function (cds_subset, grouping = "State", min_expr = NULL, cell_size = 0.75, 
-          nrow = NULL, ncol = 1, panel_order = NULL, color_by = NULL, label_by_short_name = TRUE, relative_expr = TRUE) 
+plot_genes_line<-function (cds_subset, grouping = "State", min_expr = NULL, cell_size = 0.75,
+          nrow = NULL, ncol = 1, panel_order = NULL, color_by = NULL, label_by_short_name = TRUE, relative_expr = TRUE)
 {
-  if (cds_subset@expressionFamily@vfamily %in% c("negbinomial", 
+  if (cds_subset@expressionFamily@vfamily %in% c("negbinomial",
                                                  "negbinomial.size")) {
     integer_expression <- TRUE
   }
@@ -294,7 +290,7 @@ plot_genes_line<-function (cds_subset, grouping = "State", min_expr = NULL, cell
     cds_exprs$feature_label <- cds_exprs$f_id
   }
   if (is.null(panel_order) == FALSE) {
-    cds_exprs$feature_label <- factor(cds_exprs$feature_label, 
+    cds_exprs$feature_label <- factor(cds_exprs$feature_label,
                                       levels = panel_order)
   }
   q <- ggplot(aes_string(x = grouping, y = "expression"), data = cds_exprs)
@@ -304,14 +300,14 @@ plot_genes_line<-function (cds_subset, grouping = "State", min_expr = NULL, cell
   #else {
   #  q <- q + geom_jitter(size = I(cell_size))
   #}
-  
-  q <- q + stat_summary(aes_string(color = color_by), fun.data = "mean_cl_boot", 
+
+  q <- q + stat_summary(aes_string(color = color_by), fun.data = "mean_cl_boot",
                         size = 0.35)
-  q <- q + stat_summary(aes_string(x = grouping, y = "expression", 
-                                   color = color_by, group = color_by), fun.data = "mean_cl_boot", 
+  q <- q + stat_summary(aes_string(x = grouping, y = "expression",
+                                   color = color_by, group = color_by), fun.data = "mean_cl_boot",
                         size = 0.35, geom = "line")
 
-  q <- q + scale_y_log10() + facet_wrap(~feature_label, nrow = nrow, 
+  q <- q + scale_y_log10() + facet_wrap(~feature_label, nrow = nrow,
                                         ncol = ncol, scales = "free_y")
   if (min_expr < 1) {
     q <- q + expand_limits(y = c(min_expr, 1))
@@ -364,11 +360,11 @@ jaccard_sim <- function(x) {
   # initialize similarity matrix
   m <- matrix(NA, nrow=ncol(x),ncol=ncol(x),dimnames=list(colnames(x),colnames(x)))
   jaccard <- as.data.frame(m)
-  
+
   for(i in 1:ncol(x)) {
     for(j in i:ncol(x)) {
       jaccard[i,j]= length(which(x[,i] & x[,j])) / length(which(x[,i] | x[,j]))
-      jaccard[j,i]=jaccard[i,j]        
+      jaccard[j,i]=jaccard[i,j]
     }
   }
 }
@@ -381,10 +377,10 @@ jaccard_distance <- function(m) {
   im = which(A > 0, arr.ind=TRUE)
   ## counts for each row
   b = rowSums(m)
-  
+
   ## only non-zero values of common
   Aim = A[im]
-  
+
   ## Jacard formula: #common / (#i + #j - #common)
   J = sparseMatrix(
     i = im[,1],
@@ -392,7 +388,7 @@ jaccard_distance <- function(m) {
     x = Aim / (b[im[,1]] + b[im[,2]] - Aim),
     dims = dim(A)
   )
-  
+
   return( as.dist(1 - J ))
 }
 
@@ -415,27 +411,27 @@ myggheatmap<-function(cds,geneset=c("CD44","ACHE","ETV4","ISL1","ISL2","NEUROG2"
   if(logMode){
     exprs(sub)<-log10(exprs(sub)+1.0)
   }
-  
+
   row.hclust<-hclust(dist(exprs(sub)))
-  
+
   row.cluster<-as.data.frame(cutree(row.hclust,k=rowK))
   colnames(row.cluster)<-c("rowCluster")
   row.order<-order.dendrogram(as.dendrogram(row.hclust))
-  
+
   sub.melt<-melt(exprs(sub))
-  
+
   colnames(sub.melt)<-c("gene_id","sample_id","fpkm")
-  
+
   sub.melt<-merge(sub.melt,pData(sub),by="sample_id")
-  
+
   sub.melt<-merge(sub.melt,fData(sub)[,c("gene_short_name","gene_id")],by="gene_id")
-  
+
   sub.melt<-merge(sub.melt,row.cluster,by.x="gene_id",by.y="row.names")
-  
+
   sub.melt$gene_short_name<-factor(sub.melt$gene_short_name,levels=fData(sub[row.order,])$gene_short_name)
-  
+
   sub.melt$sample_id <- factor(sub.melt$sample_id,levels=pData(sub)$sample_id[order(pData(sub)$Pseudotime,decreasing=F)])
-  
+
   p <- ggplot(sub.melt)
   p + geom_tile(aes(x=sample_id,y=gene_short_name,fill=fpkm)) + facet_grid(rowCluster~State,scales="free",space="free") + theme_change + scale_fill_gradient(low="white",high="darkred") + theme(axis.text.y=element_blank())
 }
@@ -448,10 +444,10 @@ myCorheatmap<-function(cds,logMode=T,method="color",cor.method="pearson",addrect
   }
   #print(head(t(dat)))
   dat.cor<-cor(t(dat),method=cor.method)
-  
+
   rownames(dat.cor)<-lookupGeneName(cds,rownames(dat.cor))
   colnames(dat.cor)<-lookupGeneName(cds,colnames(dat.cor))
-  
+
   corrplot(dat.cor,method=method,hclust.method=hclust.method,order=order,addrect=addrect,...)
 }
 
@@ -472,7 +468,7 @@ PCbiplot <- function(PC, x="PC1", y="PC2", color="black", shape=NULL) {
                       v2 = .7 * mult * (get(y))
   )
   plot <- plot + coord_equal() + geom_point(data=datapc, aes(x=v1, y=v2, label=varnames), size = 5, vjust=1,color="red")
-  plot <- plot + geom_segment(data=datapc, aes(x=0, y=0, xend=v1, yend=v2), arrow=arrow(length=unit(0.2,"cm")), alpha=0.75,color="red") 
+  plot <- plot + geom_segment(data=datapc, aes(x=0, y=0, xend=v1, yend=v2), arrow=arrow(length=unit(0.2,"cm")), alpha=0.75,color="red")
   plot <- plot + theme_bw()
   plot
 }
@@ -497,16 +493,16 @@ myTSNEPlot<-function(cds,markers=NULL,logMode=T,color_by="color",shape_by=NULL,s
     #print(head(tmp))
     p<-ggplot(tmp,aes(x=tSNE1_pos,y=tSNE2_pos))
     if(is.null(shape_by)){
-      p + geom_point(aes_string(color=color_by,size="value")) + facet_wrap('gene_short_name')+ theme_bw() + scale_color_brewer(palette="Set1") + monocle:::monocle_theme_opts() 
+      p + geom_point(aes_string(color=color_by,size="value")) + facet_wrap('gene_short_name')+ theme_bw() + scale_color_brewer(palette="Set1") + monocle:::monocle_theme_opts()
     }else{
-      p + geom_point(aes_string(color=color_by,size="value",shape=shape_by)) + facet_wrap('gene_short_name')+ theme_bw() + scale_color_brewer(palette="Set1")+ monocle:::monocle_theme_opts() 
+      p + geom_point(aes_string(color=color_by,size="value",shape=shape_by)) + facet_wrap('gene_short_name')+ theme_bw() + scale_color_brewer(palette="Set1")+ monocle:::monocle_theme_opts()
     }
   }else{
     p<-ggplot(tmp,aes(x=tSNE1_pos,y=tSNE2_pos))
     if(is.null(shape_by)){
-      p + geom_point(aes_string(color=color_by)) + theme_bw() + scale_color_brewer(palette="Set1")+ monocle:::monocle_theme_opts() 
+      p + geom_point(aes_string(color=color_by)) + theme_bw() + scale_color_brewer(palette="Set1")+ monocle:::monocle_theme_opts()
     }else{
-      p + geom_point(aes_string(color=color_by,shape=shape_by)) + theme_bw() + scale_color_brewer(palette="Set1")+ monocle:::monocle_theme_opts() 
+      p + geom_point(aes_string(color=color_by,shape=shape_by)) + theme_bw() + scale_color_brewer(palette="Set1")+ monocle:::monocle_theme_opts()
     }
   }
 }
@@ -533,16 +529,16 @@ myTSNEPlotAlpha<-function(cds,markers=NULL,logMode=T,color_by="color",shape_by=N
     #print(head(tmp))
     p<-ggplot(tmp,aes(x=tSNE1_pos,y=tSNE2_pos))
     if(is.null(shape_by)){
-      p + geom_point(aes_string(color=color_by,alpha="value"),stroke=0,size=cell_size) + facet_wrap('gene_short_name')+ theme_bw() + scale_color_brewer(palette="Set1") + monocle:::monocle_theme_opts() + scale_alpha(range=c(0.05,1)) 
+      p + geom_point(aes_string(color=color_by,alpha="value"),stroke=0,size=cell_size) + facet_wrap('gene_short_name')+ theme_bw() + scale_color_brewer(palette="Set1") + monocle:::monocle_theme_opts() + scale_alpha(range=c(0.05,1))
     }else{
-      p + geom_point(aes_string(color=color_by,alpha="value",stroke=0,shape=shape_by),size=cell_size) + facet_wrap('gene_short_name')+ theme_bw() + scale_color_brewer(palette="Set1")+ monocle:::monocle_theme_opts() + scale_alpha(range=c(0.05,1)) 
+      p + geom_point(aes_string(color=color_by,alpha="value",stroke=0,shape=shape_by),size=cell_size) + facet_wrap('gene_short_name')+ theme_bw() + scale_color_brewer(palette="Set1")+ monocle:::monocle_theme_opts() + scale_alpha(range=c(0.05,1))
     }
   }else{
     p<-ggplot(tmp,aes(x=tSNE1_pos,y=tSNE2_pos))
     if(is.null(shape_by)){
-      p + geom_point(aes_string(color=color_by),size=cell_size) + theme_bw() + scale_color_brewer(palette="Set1")+ monocle:::monocle_theme_opts() 
+      p + geom_point(aes_string(color=color_by),size=cell_size) + theme_bw() + scale_color_brewer(palette="Set1")+ monocle:::monocle_theme_opts()
     }else{
-      p + geom_point(aes_string(color=color_by,shape=shape_by),size=cell_size) + theme_bw() + scale_color_brewer(palette="Set1")+ monocle:::monocle_theme_opts() 
+      p + geom_point(aes_string(color=color_by,shape=shape_by),size=cell_size) + theme_bw() + scale_color_brewer(palette="Set1")+ monocle:::monocle_theme_opts()
     }
   }
 }
@@ -582,11 +578,11 @@ myTSNEPlotRainbow<-function(cds,red="Bdnf",green="Fos",blue="empty",logMode=T,sh
   if(is.null(shape_by)){
     p + geom_point(fill="white",color="black",stroke=0.25,size=cell_size) +
       geom_point(color=genes$plotColor,stroke=0,size=cell_size) +
-      monocle:::monocle_theme_opts() + ggtitle(titleString) 
+      monocle:::monocle_theme_opts() + ggtitle(titleString)
   }else{
     p + geom_point(aes_string(shape=shape_by),fill="white",color="black",stroke=0.25,size=cell_size) +
       geom_point(aes_string(shape=shape_by),stroke=0,color=genes$plotColor,size=cell_size) +
-      monocle:::monocle_theme_opts() + ggtitle(titleString) 
+      monocle:::monocle_theme_opts() + ggtitle(titleString)
   }
 }
 
@@ -606,7 +602,7 @@ myTSNEPlotRainbow2<-function(cds,red="Bdnf",green="Fos",blue="empty",logMode=T,s
   if(discrete){
     #genes<-genes/rowSums(genes)
     #genes[is.na(genes)]<-0
-    
+
     genes<-as.data.frame(genes)
     #Map to Rgb
     if(blue=="empty"){
@@ -624,7 +620,7 @@ myTSNEPlotRainbow2<-function(cds,red="Bdnf",green="Fos",blue="empty",logMode=T,s
         geom_point(aes_string(alpha=green),color="green",fill="green",stroke=0,size=cell_size) +
         geom_point(aes_string(alpha=blue),color="blue",fill="blue",stroke=0,size=cell_size) +
         scale_alpha(range=c(0,0.5)) + guides(alpha=FALSE) +
-        monocle:::monocle_theme_opts() + ggtitle(titleString) 
+        monocle:::monocle_theme_opts() + ggtitle(titleString)
     }else{
       p<-ggplot(genes,aes_string(x='tSNE1_pos',y='tSNE2_pos',shape=shape_by))
       p + geom_point(aes_string(shape=shape_by),color="white",stroke=0.25,size=cell_size) +
@@ -632,11 +628,11 @@ myTSNEPlotRainbow2<-function(cds,red="Bdnf",green="Fos",blue="empty",logMode=T,s
         geom_point(aes_string(alpha=genes$green),color="green",stroke=0,size=cell_size) +
         geom_point(aes_string(alpha=genes$blue),color="blue",stroke=0,size=cell_size) +
         scale_alpha(range=c(0,0.5)) + guides(alpha=FALSE) +
-        monocle:::monocle_theme_opts() + ggtitle(titleString) 
+        monocle:::monocle_theme_opts() + ggtitle(titleString)
     }
   }else{
     genes[is.na(genes)]<-1
- 
+
     genes<-as.data.frame(genes)
     #Map to Rgb
     if(blue=="empty"){
@@ -653,11 +649,11 @@ myTSNEPlotRainbow2<-function(cds,red="Bdnf",green="Fos",blue="empty",logMode=T,s
     if(is.null(shape_by)){
       p + geom_point(fill="white",color="black",stroke=0.25,size=cell_size) +
         geom_point(color=genes$plotColor,stroke=0,size=cell_size) +
-        monocle:::monocle_theme_opts() + ggtitle(titleString) 
+        monocle:::monocle_theme_opts() + ggtitle(titleString)
     }else{
       p + geom_point(aes_string(shape=shape_by),fill="white",color="black",stroke=0.25,size=cell_size) +
         geom_point(aes_string(shape=shape_by),stroke=0,color=genes$plotColor,size=cell_size) +
-        monocle:::monocle_theme_opts() + ggtitle(titleString) 
+        monocle:::monocle_theme_opts() + ggtitle(titleString)
     }
   }
 }
@@ -674,8 +670,8 @@ my_pseudotime_plot_celltype<-function(cds_subset,marker="Cdh13"){
                      "celltype2"=as.vector(genSmoothCurves(dat.filtered[markerId,pData(dat.filtered)$celltype==2],cores=1, trend_formula="~sm.ns(Pseudotime,df=3)",relative_expr=T,new_data=newdata))),
           id.vars = "Pseudotime")
 
-  p<-ggplot(meltCDS(dat.filtered,geneset=marker)) + 
-    geom_jitter(aes(x=Pseudotime,y=value,color=celltype),width=1) + 
+  p<-ggplot(meltCDS(dat.filtered,geneset=marker)) +
+    geom_jitter(aes(x=Pseudotime,y=value,color=celltype),width=1) +
     geom_line(aes(x=Pseudotime,y=value,color=variable,group=variable),data=tmp) + ggtitle(marker) +
     scale_color_manual(values=c(celltype_colors,celltype_colors)) + monocle:::monocle_theme_opts()
   p
