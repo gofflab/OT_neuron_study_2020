@@ -1,7 +1,6 @@
 # Mouse Oxytocinergic neuron scRNA-Seq study 2020
 Raw and processed scRNA-Seq data for:
-- Parallel social information processing circuits are differentially impacted in autism (2020)
-- [Parallel social information processing circuits are differentially impacted in autism](https://doi.org/10.1101/2020.03.13.990549)
+- [Parallel social information processing circuits are differentially impacted in autism (2020)](https://doi.org/10.1101/2020.03.13.990549)
 Eastman M. Lewis, Genevieve L. Stein-O’Brien, Alejandra V. Patino, Romain Nardou, Cooper D. Grossman, Matthew Brown, Bidii Bangamwabo, Ndeye Ndiaye, Daniel Giovinazzo, Ian Dardani, Connie Jiang, Loyal A. Goff, Gül Dölen
 https://doi.org/10.1101/2020.03.13.990549
 
